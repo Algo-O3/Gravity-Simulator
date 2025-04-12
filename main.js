@@ -154,34 +154,37 @@ function updatePhysics(deltaTime) {
 }
 
 function checkCollisions() {
-    
     if (!simulationActive) return;
-    
-    for(let i = objects.length-1; i >= 0; i--) {
-        for(let j = i-1; j >= 0; j--) {
+
+    for (let i = objects.length - 1; i >= 0; i--) {
+        for (let j = i - 1; j >= 0; j--) {
             const obj1 = objects[i];
             const obj2 = objects[j];
-            
+
             const dx = obj2.mesh.position.x - obj1.mesh.position.x;
             const dz = obj2.mesh.position.z - obj1.mesh.position.z;
-            const distance = Math.sqrt(dx*dx + dz*dz);
-            
-            if(distance < obj1.radius + obj2.radius) {
+            const distance = Math.sqrt(dx * dx + dz * dz);
+
+            if (distance < obj1.radius + obj2.radius) {
                 const totalMass = obj1.mass + obj2.mass;
                 const newObj = new SpaceObject(
-                    (obj1.mesh.position.x*obj1.mass + obj2.mesh.position.x*obj2.mass)/totalMass,
-                    (obj1.mesh.position.z*obj1.mass + obj2.mesh.position.z*obj2.mass)/totalMass
+                    (obj1.mesh.position.x * obj1.mass + obj2.mesh.position.x * obj2.mass) / totalMass,
+                    (obj1.mesh.position.z * obj1.mass + obj2.mesh.position.z * obj2.mass) / totalMass
                 );
-                
-                newObj.velocity.x = (obj1.velocity.x*obj1.mass + obj2.velocity.x*obj2.mass)/totalMass;
-                newObj.velocity.z = (obj1.velocity.z*obj1.mass + obj2.velocity.z*obj2.mass)/totalMass;
+
+                newObj.velocity.x = (obj1.velocity.x * obj1.mass + obj2.velocity.x * obj2.mass) / totalMass;
+                newObj.velocity.z = (obj1.velocity.z * obj1.mass + obj2.velocity.z * obj2.mass) / totalMass;
                 newObj.mass = totalMass;
-                newObj.radius = (obj1.radius +obj2.radius);
-                
+                newObj.radius = obj1.radius + obj2.radius;
+
+                // Update the geometry of the new object's mesh to reflect the new radius
+                newObj.mesh.geometry.dispose();
+                newObj.mesh.geometry = new THREE.SphereGeometry(newObj.radius, 32, 32);
+
                 removeObject(obj1.mesh);
                 removeObject(obj2.mesh);
-                addObject(newObj.mesh.position.x, newObj.mesh.position.z);
-                objects[objects.length-1] = newObj;
+                scene.add(newObj.mesh);
+                objects.push(newObj);
             }
         }
     }
