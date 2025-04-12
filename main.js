@@ -5,7 +5,7 @@ let placementActive = false;
 let removalActive = false;
 let selectedObject = null;
 let simulationActive = false; 
-
+let previousState = null; 
 class SpaceObject {
     constructor(x, z) {
         this.mass = 1;
@@ -57,6 +57,7 @@ function init() {
     document.getElementById('completeBtn').addEventListener('click', completeAction);
     document.getElementById('startBtn').addEventListener('click', startSimulation);
     document.getElementById('stopBtn').addEventListener('click', stopSimulation);
+    document.getElementById('prevBtn').addEventListener('click', restoreState);
     renderer.domElement.addEventListener('click', handleClick);
     window.addEventListener('resize', onWindowResize);
 }
@@ -101,6 +102,7 @@ function completeAction() {
 }
 
 function startSimulation() {
+    saveState(); 
     simulationActive = true;
     document.getElementById('startBtn').classList.add('active');
     document.getElementById('stopBtn').classList.remove('active');
@@ -175,9 +177,9 @@ function checkCollisions() {
                 newObj.velocity.x = (obj1.velocity.x * obj1.mass + obj2.velocity.x * obj2.mass) / totalMass;
                 newObj.velocity.z = (obj1.velocity.z * obj1.mass + obj2.velocity.z * obj2.mass) / totalMass;
                 newObj.mass = totalMass;
-                newObj.radius = obj1.radius + obj2.radius;
+                var K =Math.cbrt(totalMass/obj1.mass);
+                newObj.radius = obj1.radius * K;
 
-                // Update the geometry of the new object's mesh to reflect the new radius
                 newObj.mesh.geometry.dispose();
                 newObj.mesh.geometry = new THREE.SphereGeometry(newObj.radius, 32, 32);
 
@@ -347,6 +349,49 @@ function updateSpacetimeCurvature() {
   
     posAttr.needsUpdate = true;
     geometry.computeVertexNormals();
+}
+
+function saveState() {
+    previousState = objects.map(obj => ({
+        mass: obj.mass,
+        radius: obj.radius,
+        color: obj.color,
+        velocity: { x: obj.velocity.x, z: obj.velocity.z },
+        position: { x: obj.mesh.position.x, z: obj.mesh.position.z }
+    }));
+}
+
+function restoreState() {
+    if (!previousState) return;
+
+    stopSimulation();
+
+    objects.forEach(obj => {
+        scene.remove(obj.mesh);
+
+        obj.mesh.geometry.dispose();
+        obj.mesh.material.dispose();
+    });
+
+    objects = [];
+
+    previousState.forEach(state => {
+        const restoredObj = new SpaceObject(state.position.x, state.position.z);
+        restoredObj.mass = state.mass;
+        restoredObj.radius = state.radius;
+        restoredObj.color = state.color;
+        restoredObj.velocity.x = state.velocity.x;
+        restoredObj.velocity.z = state.velocity.z;
+
+        restoredObj.mesh.geometry.dispose();
+        restoredObj.mesh.geometry = new THREE.SphereGeometry(restoredObj.radius, 32, 32);
+        restoredObj.mesh.material.color.set(state.color);
+
+        scene.add(restoredObj.mesh);
+        objects.push(restoredObj);
+    });
+
+    previousState = null;
 }
 
 function animate() {
