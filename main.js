@@ -6,6 +6,8 @@ let removalActive = false;
 let selectedObject = null;
 let simulationActive = false; 
 let previousState = null; 
+let cameraFollowObject = null; // Variable to track the object the camera should follow
+
 class SpaceObject {
     constructor(x, z) {
         this.mass = 1;
@@ -25,14 +27,71 @@ class SpaceObject {
     }
 }
 
+class Node {
+    constructor(data) {
+        this.data = data;
+        this.next = null;
+        this.prev = null;
+    }
+}
+
+class DoublyLinkedList {
+    constructor() {
+        this.head = null;
+        this.tail = null;
+        this.current = null;
+    }
+
+    add(data) {
+        const newNode = new Node(data);
+        if (!this.head) {
+            this.head = this.tail = newNode;
+        } else {
+            this.tail.next = newNode;
+            newNode.prev = this.tail;
+            this.tail = newNode;
+        }
+        this.current = newNode; // Set the current node to the newly added node
+    }
+
+    moveToPrevious() {
+        // If current is null, set it to the tail (last node)
+        if (!this.current) {
+            this.current = this.tail;
+            return this.current ? this.current.data : null;
+        }
+
+        // Move to the previous node if it exists
+        if (this.current.prev) {
+            this.current = this.current.prev;
+            return this.current.data;
+        }
+
+        // If no previous node exists, stay at the head and return its data
+        return this.current.data;
+    }
+
+    moveToNext() {
+        if (this.current && this.current.next) {
+            this.current = this.current.next;
+            return this.current.data;
+        }
+        return null;
+    }
+}
+
+let stateHistory = new DoublyLinkedList();
+
 function init() {
-   
+    const loader = document.getElementById('loader');
+    loader.style.display = 'flex';
+
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
 
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.set(15, 15, 15);
-    
+
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
@@ -41,7 +100,7 @@ function init() {
 
     const axesHelper = new THREE.AxesHelper(15);
     scene.add(axesHelper);
-    
+
     const light = new THREE.DirectionalLight(0xffffff, 1);
     light.position.set(0, 25, 0);
     scene.add(light);
@@ -51,20 +110,34 @@ function init() {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
-
     document.getElementById('addBtn').addEventListener('click', startPlacement);
     document.getElementById('removeBtn').addEventListener('click', startRemoval);
     document.getElementById('completeBtn').addEventListener('click', completeAction);
     document.getElementById('startBtn').addEventListener('click', startSimulation);
     document.getElementById('stopBtn').addEventListener('click', stopSimulation);
-    document.getElementById('prevBtn').addEventListener('click', restoreState);
+    document.getElementById('prevBtn').addEventListener('click', () => {
+        const previousState = stateHistory.moveToPrevious();
+        if (previousState) {
+            restoreState(previousState);
+        }
+    });
+    document.getElementById('nextBtn').addEventListener('click', () => {
+        const nextState = stateHistory.moveToNext();
+        if (nextState) {
+            restoreState(nextState);
+        }
+    });
     renderer.domElement.addEventListener('click', handleClick);
     window.addEventListener('resize', onWindowResize);
+
+    setTimeout(() => {
+        loader.style.display = 'none';
+    }, 1000); 
 }
 
 function createGrid() {
-    const gridSize = 100;
-    const divisions = 100;
+    const gridSize = 500;
+    const divisions = 500;
     
     const geometry = new THREE.PlaneGeometry(gridSize, gridSize, divisions, divisions);
     const material = new THREE.MeshPhongMaterial({
@@ -182,6 +255,7 @@ function checkCollisions() {
 
                 newObj.mesh.geometry.dispose();
                 newObj.mesh.geometry = new THREE.SphereGeometry(newObj.radius, 32, 32);
+                setCameraFollow(null); // Stop following any object
 
                 removeObject(obj1.mesh);
                 removeObject(obj2.mesh);
@@ -217,7 +291,8 @@ function handleClick(event) {
     } else {
         const intersects = raycaster.intersectObjects(objects.map(o => o.mesh));
         if (intersects.length > 0) {
-            showContextMenu(event.clientX, event.clientY, intersects[0].object.userData.object);
+            const clickedObject = intersects[0].object.userData.object;
+            showContextMenu(event.clientX, event.clientY, clickedObject);
         }
     }
 }
@@ -238,13 +313,17 @@ function showContextMenu(x, y, object) {
         <div class="menu-item">
             <label>Color: <input type="color" id="colorInput" value="#${colorObj.getHexString()}"></label>
         </div>
-    <div class="menu-item">
-        <label>Velocity X</label>
-        <input type="number" step="0.1" id="velX" value="${selectedObject.velocity.x}">
-    </div>
-    <div class="menu-item">
-        <label>Velocity Z</label>
-        <input type="number" step="0.1" id="velZ" value="${selectedObject.velocity.z}">
+        <div class="menu-item">
+            <label>Velocity X</label>
+            <input type="number" step="0.1" id="velX" value="${selectedObject.velocity.x}">
+        </div>
+        <div class="menu-item">
+            <label>Velocity Z</label>
+            <input type="number" step="0.1" id="velZ" value="${selectedObject.velocity.z}">
+        </div>
+        <div class="menu-item">
+            <label><input type="checkbox" id="followCheckbox" ${cameraFollowObject === object ? 'checked' : ''}> Follow</label>
+        </div>
         <div class="menu-buttons">
             <button id="applyButton" onclick="updateObject()">Apply</button>
             <button id="cancelButton" onclick="hideContextMenu()">Cancel</button>
@@ -252,6 +331,15 @@ function showContextMenu(x, y, object) {
     `;
     
     menu.style.display = 'block';
+
+    // Add event listener for the follow checkbox
+    document.getElementById('followCheckbox').addEventListener('change', (event) => {
+        if (event.target.checked) {
+            setCameraFollow(object); // Set the camera to follow this object
+        } else {
+            setCameraFollow(null); // Stop following any object
+        }
+    });
 
     setTimeout(() => {
         const viewportWidth = window.innerWidth;
@@ -352,17 +440,18 @@ function updateSpacetimeCurvature() {
 }
 
 function saveState() {
-    previousState = objects.map(obj => ({
+    const currentState = objects.map(obj => ({
         mass: obj.mass,
         radius: obj.radius,
         color: obj.color,
         velocity: { x: obj.velocity.x, z: obj.velocity.z },
         position: { x: obj.mesh.position.x, z: obj.mesh.position.z }
     }));
+    stateHistory.add(currentState);
 }
 
-function restoreState() {
-    if (!previousState) return;
+function restoreState(state) {
+    if (!state) return;
 
     stopSimulation();
 
@@ -375,23 +464,66 @@ function restoreState() {
 
     objects = [];
 
-    previousState.forEach(state => {
-        const restoredObj = new SpaceObject(state.position.x, state.position.z);
-        restoredObj.mass = state.mass;
-        restoredObj.radius = state.radius;
-        restoredObj.color = state.color;
-        restoredObj.velocity.x = state.velocity.x;
-        restoredObj.velocity.z = state.velocity.z;
+    state.forEach(savedObj => {
+        const restoredObj = new SpaceObject(savedObj.position.x, savedObj.position.z);
+        restoredObj.mass = savedObj.mass;
+        restoredObj.radius = savedObj.radius;
+        restoredObj.color = savedObj.color;
+        restoredObj.velocity.x = savedObj.velocity.x;
+        restoredObj.velocity.z = savedObj.velocity.z;
 
         restoredObj.mesh.geometry.dispose();
         restoredObj.mesh.geometry = new THREE.SphereGeometry(restoredObj.radius, 32, 32);
-        restoredObj.mesh.material.color.set(state.color);
+        restoredObj.mesh.material.color.set(savedObj.color);
 
         scene.add(restoredObj.mesh);
         objects.push(restoredObj);
     });
+}
 
-    previousState = null;
+function setCameraFollow(object) {
+    cameraFollowObject = object;
+
+    if (object) {
+        const objPos = object.mesh.position;
+
+        // Position the camera in front of the object
+        const offsetDistance = -50; // Distance between the camera and the object
+        const cameraHeight = 5; // Height of the camera above the object
+        camera.position.set(objPos.x, objPos.y + cameraHeight, objPos.z + offsetDistance);
+
+        // Make the camera look at the object
+        camera.lookAt(objPos.x, objPos.y, objPos.z);
+    }
+}
+
+function updateCameraFollow() {
+    if (!cameraFollowObject) return;
+
+    const objPos = cameraFollowObject.mesh.position;
+
+    // Define the offset distance and height for the camera
+    const offsetDistance = 15; // Distance between the camera and the object
+    const cameraHeight = 10; // Height of the camera above the object
+
+    // Calculate the direction vector from the object to the camera
+    const direction = new THREE.Vector3(0, 0, -1); // Default direction (negative Z-axis)
+    direction.applyQuaternion(cameraFollowObject.mesh.quaternion); // Adjust based on object's orientation
+    direction.normalize();
+
+    // Set the camera's position relative to the object
+    camera.position.set(
+        objPos.x - direction.x * offsetDistance,
+        objPos.y + cameraHeight,
+        objPos.z - direction.z * offsetDistance
+    );
+
+    // Make the camera look at the object
+    camera.lookAt(objPos.x, objPos.y, objPos.z);
+
+    // Ensure the camera's controls are updated
+    controls.target.set(objPos.x, objPos.y, objPos.z);
+    controls.update();
 }
 
 function animate() {
@@ -401,6 +533,7 @@ function animate() {
     updatePhysics(deltaTime);
     checkCollisions();
     updateSpacetimeCurvature();
+    updateCameraFollow(); // Update the camera position if following an object
     
     controls.update();
     renderer.render(scene, camera);
